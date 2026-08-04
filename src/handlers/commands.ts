@@ -77,8 +77,23 @@ export function registerCommandHandlers(app: App) {
         }
 
         case "lock": {
+          // arg is "" when no number is given at all, and Number("") is 0
+          // (not NaN), so this used to sail straight past the
+          // Number.isFinite check in findCallBySeq, query for seq=0 (which
+          // never exists), and land on the generic "couldn't find that
+          // call" message. That reads like a data problem when it's really
+          // a usage problem, catching it here gives the actual answer.
+          if (!arg) return ephemeralUsage(client, command, "lock");
           const call = await findCallBySeq(command.team_id, Number(arg));
           if (!call) return ephemeralNotFound(client, command);
+          if (call.status !== "open") {
+            await client.chat.postEphemeral({
+              channel: command.channel_id,
+              user: command.user_id,
+              text: `#${call.seq} is already *${call.status}*, nothing to lock.`,
+            });
+            return;
+          }
           await lockCall(call.id);
           await recordAuditEvent(call.id, command.user_id, "locked", "manual lock");
           if (call.threadTs) {
@@ -94,8 +109,17 @@ export function registerCommandHandlers(app: App) {
         }
 
         case "resolve": {
+          if (!arg) return ephemeralUsage(client, command, "resolve");
           const call = await findCallBySeq(command.team_id, Number(arg));
           if (!call) return ephemeralNotFound(client, command);
+          if (call.status === "resolved") {
+            await client.chat.postEphemeral({
+              channel: command.channel_id,
+              user: command.user_id,
+              text: `#${call.seq} was already resolved by <@${call.resolvedBy}>: ${call.resultText}`,
+            });
+            return;
+          }
           await client.views.open({
             trigger_id: body.trigger_id,
             view: buildResolveModal(call.id, call.question),
@@ -104,8 +128,22 @@ export function registerCommandHandlers(app: App) {
         }
 
         case "join": {
+          if (!arg) return ephemeralUsage(client, command, "join");
           const call = await findCallBySeq(command.team_id, Number(arg));
           if (!call) return ephemeralNotFound(client, command);
+          if (call.status !== "open") {
+            // The thread-reply listener (handlers/messages.ts) only
+            // records predictions via getCallByThread, which only matches
+            // status = 'open'. Without this guard, prompting someone to
+            // reply to a locked call told them their reply would be
+            // recorded when it silently never would be.
+            await client.chat.postEphemeral({
+              channel: command.channel_id,
+              user: command.user_id,
+              text: `#${call.seq} is ${call.status}, predictions are closed. It can no longer accept a call.`,
+            });
+            return;
+          }
           // The actual pick is collected in a follow-up reply rather than
           // as a command argument, so it isn't limited to a single line
           // pasted after the id. handlers/messages.ts is what actually
@@ -176,5 +214,17 @@ async function ephemeralNotFound(client: App["client"], command: { channel_id: s
     channel: command.channel_id,
     user: command.user_id,
     text: "Couldn't find that call. Use /calledit mine to see your call numbers.",
+  });
+}
+
+async function ephemeralUsage(
+  client: App["client"],
+  command: { channel_id: string; user_id: string },
+  sub: "lock" | "resolve" | "join",
+) {
+  await client.chat.postEphemeral({
+    channel: command.channel_id,
+    user: command.user_id,
+    text: `\`/calledit ${sub}\` needs a call number, e.g. \`/calledit ${sub} 3\`. Run \`/calledit mine\` to see yours.`,
   });
 }
