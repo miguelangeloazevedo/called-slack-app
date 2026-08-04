@@ -47,10 +47,19 @@ export function renderInstallPage(installUrl: string): string {
   }
   h1 {
     font-size: 22px;
+    font-weight: 400;
     letter-spacing: 0.12em;
     text-transform: uppercase;
     margin: 0 0 12px;
   }
+  /* Uppercased and run together with no space, CALLEDIT read as one
+     unbroken word with no way to tell where "Called" ends and "it" begins.
+     The rest of the page's text sits at normal weight (the .label, .fine
+     and body copy never set font-weight at all), so h1 is dropped to that
+     same 400 baseline and only "it" is bumped back up to bold, giving the
+     two halves of the word actual contrast instead of relying on a gap
+     that isn't there. */
+  .accent { font-weight: 700; }
   p {
     font-size: 14px;
     line-height: 1.6;
@@ -98,8 +107,8 @@ export function renderInstallPage(installUrl: string): string {
 </head>
 <body>
   <div class="card">
-    <p class="label">Runciter // Calledit</p>
-    <h1>Add Calledit to Slack</h1>
+    <p class="label">Runciter // Called<span class="accent">it</span></p>
+    <h1>Add Called<span class="accent">it</span> to Slack</h1>
     <p>Turn a Slack question into a locked prediction. Ask, set a deadline, and Calledit posts who called it once it settles.</p>
 
     <a class="btn" href="${safeUrl}">Add to Slack &nbsp;&rarr;</a>
