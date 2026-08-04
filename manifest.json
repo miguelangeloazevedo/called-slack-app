@@ -27,6 +27,9 @@
     ]
   },
   "oauth_config": {
+    "redirect_urls": [
+      "https://api.called.runciter.app/slack/oauth_redirect"
+    ],
     "scopes": {
       "bot": [
         "commands",
