@@ -96,11 +96,23 @@ export function registerCommandHandlers(app: App) {
         // a command argument, so it isn't limited to a single line pasted
         // after the id. handlers/messages.ts is what actually turns that
         // reply into a recorded prediction.
+        //
+        // Ephemeral messages have to be posted to the channel the command
+        // was actually run in, not the call's own channel, an earlier
+        // version posted to call.channelId instead, which meant running
+        // /calledit join from anywhere other than the exact channel the
+        // call lives in silently sent the prompt somewhere the caller
+        // wasn't looking. thread_ts only makes sense when those two
+        // channels are the same, a thread_ts from a different channel
+        // isn't valid here.
+        const sameChannel = call.channelId === command.channel_id;
         await client.chat.postEphemeral({
-          channel: call.channelId,
+          channel: command.channel_id,
           user: command.user_id,
-          text: `What's your call on "${call.question}"? Reply in this thread and I'll record it.`,
-          thread_ts: call.threadTs ?? undefined,
+          text: sameChannel
+            ? `What's your call on "${call.question}"? Reply in this thread and I'll record it.`
+            : `What's your call on "${call.question}"? That call is in <#${call.channelId}>, reply in its thread there and I'll record it.`,
+          thread_ts: sameChannel ? call.threadTs ?? undefined : undefined,
         });
         await recordAuditEvent(call.id, command.user_id, "joined", "via /calledit join");
         return;
