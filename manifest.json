@@ -1,17 +1,17 @@
 {
   "display_information": {
-    "name": "Called",
+    "name": "Calledit",
     "description": "Record, seal and settle predictions in Slack.",
     "background_color": "#0a0a0a"
   },
   "features": {
     "bot_user": {
-      "display_name": "Called",
+      "display_name": "Calledit",
       "always_online": true
     },
     "slash_commands": [
       {
-        "command": "/call",
+        "command": "/calledit",
         "description": "Make a call, or manage one you've already made.",
         "usage_hint": "[mine | open | lock <id> | resolve <id> | join <id>]",
         "should_escape": false

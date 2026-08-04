@@ -95,7 +95,7 @@ export function buildNewCallModal(state: NewCallModalState): ModalView {
               elements: [
                 {
                   type: "mrkdwn" as const,
-                  text: "Called posts the question. Anyone in the channel replies with their own call, in their own words.",
+                  text: "Calledit posts the question. Anyone in the channel replies with their own call, in their own words.",
                 },
               ],
             },

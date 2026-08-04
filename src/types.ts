@@ -1,9 +1,9 @@
-// Core domain types for Called. Kept in one file since the model is small
+// Core domain types for Calledit. Kept in one file since the model is small
 // and every handler needs to agree on the same shapes.
 
 export type EntryMode = "proxy" | "channel";
 // proxy   -> the creator enters name/pick pairs directly (going round the room).
-// channel -> Called posts the question and anyone in the channel replies with
+// channel -> Calledit posts the question and anyone in the channel replies with
 //            their own call in the thread.
 
 export type Visibility = "sealed_until_close" | "open" | "sealed_until_result";

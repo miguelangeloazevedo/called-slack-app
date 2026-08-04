@@ -2,7 +2,7 @@
   "name": "called-slack-app",
   "version": "0.1.0",
   "private": true,
-  "description": "Called: a Slack app for recording, sealing and settling predictions.",
+  "description": "Calledit: a Slack app for recording, sealing and settling predictions.",
   "main": "dist/app.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/app.ts",

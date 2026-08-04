@@ -8,7 +8,7 @@ export function renderInstallPage(installUrl: string): string {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Install Called</title>
+<title>Install Calledit</title>
 <style>
   :root { color-scheme: dark; }
   body {
@@ -49,12 +49,12 @@ export function renderInstallPage(installUrl: string): string {
       <path d="M48 20 L55 16 M48 26 L56 26"/>
       <path d="M16 20 L9 16 M16 26 L8 26"/>
     </svg>
-    <h1>Install Called</h1>
+    <h1>Install Calledit</h1>
     <p>Record, seal and settle predictions in Slack. One flat price per workspace, first month free.</p>
     <ol>
       <li>Approve the permissions on the next screen.</li>
-      <li>Invite the bot to any channel: <code>/invite @Called</code></li>
-      <li>Make your first call: <code>/call</code></li>
+      <li>Invite the bot to any channel: <code>/invite @Calledit</code></li>
+      <li>Make your first call: <code>/calledit</code></li>
     </ol>
     <a class="btn" href="${installUrl}">Add to Slack</a>
   </div>

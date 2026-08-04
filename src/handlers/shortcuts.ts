@@ -2,7 +2,7 @@ import type { App } from "@slack/bolt";
 import { buildNewCallModal } from "../modals";
 
 // "Make a prediction" message shortcut: right-click any message to turn its
-// text straight into a call's question, skipping the trip through /call.
+// text straight into a call's question, skipping the trip through /calledit.
 export function registerShortcutHandlers(app: App) {
   app.shortcut("make_a_prediction", async ({ ack, shortcut, client }) => {
     await ack();
@@ -14,7 +14,7 @@ export function registerShortcutHandlers(app: App) {
       proxyRowCount: 3,
     });
     // Pre-fill the question with the source message's text; the block
-    // structure is identical to the plain /call modal from here on.
+    // structure is identical to the plain /calledit modal from here on.
     const questionBlock = view.blocks.find(
       (b) => "block_id" in b && b.block_id === "question",
     ) as any;

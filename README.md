@@ -1,8 +1,11 @@
-# Called
+# Calledit
 
 A Slack app for recording, sealing and settling predictions. Sibling project to
 [Runciter Ledger](https://github.com/miguelangeloazevedo/ledger-slack-app), same VPS,
-same pattern.
+same pattern. The Slack command is `/calledit` (`/call` is a Slack-reserved built-in
+command and can't be registered by a custom app; `/called` was tried too but read
+awkwardly as a command, so the app is named to match `/calledit` directly rather than
+carry a mismatched name).
 
 ## Stack
 

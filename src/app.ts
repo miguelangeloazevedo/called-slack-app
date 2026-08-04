@@ -14,7 +14,7 @@ const scopes = (process.env.SLACK_SCOPES ?? "").split(",").map((s) => s.trim()).
 
 // Socket Mode, matching Ledger and the manifest (socket_mode_enabled: true).
 // An earlier version of this file used a plain ExpressReceiver instead,
-// which meant Called had an HTTP server but was never actually connected
+// which meant Calledit had an HTTP server but was never actually connected
 // to Slack over the socket, so commands and interactivity silently never
 // arrived. SocketModeReceiver still runs a small internal Express app for
 // the OAuth install/redirect endpoints (exposed as `receiver.app`, used
@@ -67,8 +67,8 @@ registerShortcutHandlers(app);
   const port = Number(process.env.PORT ?? 3300);
   await app.start(port);
   startReminders(app);
-  console.log(`⚡️ Called is running on port ${port} (OAuth-installable).`);
+  console.log(`⚡️ Calledit is running on port ${port} (OAuth-installable).`);
 })().catch((err) => {
-  console.error("Failed to start Called", err);
+  console.error("Failed to start Calledit", err);
   process.exit(1);
 });

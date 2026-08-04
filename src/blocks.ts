@@ -1,7 +1,7 @@
 import type { KnownBlock } from "@slack/bolt";
 import type { Call, Prediction } from "./types";
 
-// Block Kit builders for every card Called posts. Kept separate from the
+// Block Kit builders for every card Calledit posts. Kept separate from the
 // handlers that call them so the visual shape of a call is defined in one
 // place and reused everywhere (open card, lock notice, resolve card).
 

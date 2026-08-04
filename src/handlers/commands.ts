@@ -11,7 +11,7 @@ import { buildNewCallModal, buildResolveModal } from "../modals";
 import { lockNoticeBlocks } from "../blocks";
 
 export function registerCommandHandlers(app: App) {
-  app.command("/call", async ({ ack, command, client, body }) => {
+  app.command("/calledit", async ({ ack, command, client, body }) => {
     await ack();
 
     const [sub, ...rest] = command.text.trim().split(/\s+/).filter(Boolean);
@@ -100,7 +100,7 @@ export function registerCommandHandlers(app: App) {
         // version of this; recording straight from the ephemeral reply
         // requires a message listener scoped to that thread, added in a
         // follow-up pass once the rest of the lifecycle is solid.
-        await recordAuditEvent(call.id, command.user_id, "joined", "via /call join");
+        await recordAuditEvent(call.id, command.user_id, "joined", "via /calledit join");
         return;
       }
 
@@ -108,7 +108,7 @@ export function registerCommandHandlers(app: App) {
         await client.chat.postEphemeral({
           channel: command.channel_id,
           user: command.user_id,
-          text: `Unrecognised subcommand "${sub}". Try /call, /call mine, /call open, /call lock <id>, /call resolve <id>, or /call join <id>.`,
+          text: `Unrecognised subcommand "${sub}". Try /calledit, /calledit mine, /calledit open, /calledit lock <id>, /calledit resolve <id>, or /calledit join <id>.`,
         });
     }
   });
@@ -128,6 +128,6 @@ async function ephemeralNotFound(client: App["client"], command: { channel_id: s
   await client.chat.postEphemeral({
     channel: command.channel_id,
     user: command.user_id,
-    text: "Couldn't find that call. Use /call mine to see the ids of your calls.",
+    text: "Couldn't find that call. Use /calledit mine to see the ids of your calls.",
   });
 }
