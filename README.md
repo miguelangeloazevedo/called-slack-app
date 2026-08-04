@@ -88,12 +88,16 @@ in-process timer), the custom OAuth install page, and Paddle entitlement
 handling with the verified-install-or-hint reconciliation pattern proven on
 Ledger.
 
-Not yet built: recording a channel-mode reply as a prediction (the ephemeral
-prompt exists; parsing the actual thread reply back into a prediction row is
-the next piece), the "post to channel" audience actually posting to a specific
+Not yet built: the "post to channel" audience actually posting to a specific
 list of invited people versus fully open, consequence-pending tracking and
 nudges, and the App Home surface (deliberately out of scope per the product
 decisions this was built from, everything stays in-channel).
+
+Thread replies are captured as predictions (handlers/messages.ts), this
+requires the channels:history / groups:history scopes and the
+message.channels / message.groups event subscription, both added after the
+first install, so an already-installed workspace needs to reauthorize
+(reinstall via the install link) before this actually works there.
 
 ## Environment variables
 

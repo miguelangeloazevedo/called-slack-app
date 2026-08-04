@@ -148,6 +148,41 @@ export async function getCall(callId: string): Promise<Call | null> {
   return rows[0] ? rowToCall(rows[0]) : null;
 }
 
+// Looks a call up by its short id (the first 8 characters of the UUID,
+// shown on every card and in `mine`/`open` listings) across the whole
+// workspace, not just calls the caller happens to already be attached to.
+// An earlier version of the /calledit join/lock/resolve lookup only
+// searched the caller's own calls and fell back to an exact full-UUID
+// match, which meant the entire point of "join a call you weren't
+// originally part of" silently never worked: the short id never matched
+// listCallsForUser's results for someone uninvolved, and never matched the
+// exact-UUID fallback either, since a short id is a prefix, not a full
+// UUID.
+export async function findCallByShortId(workspaceId: string, shortId: string): Promise<Call | null> {
+  // Guard against an empty id: with the LIKE below, '' || '%' is just '%',
+  // which would match every call in the workspace and silently return
+  // whichever was created most recently, exactly wrong for a lock/resolve/
+  // join command run without an id.
+  if (!shortId) return null;
+  const { rows } = await pool.query(
+    `SELECT * FROM calls WHERE workspace_id = $1 AND id::text LIKE $2 || '%' ORDER BY created_at DESC LIMIT 1`,
+    [workspaceId, shortId],
+  );
+  return rows[0] ? rowToCall(rows[0]) : null;
+}
+
+// Used by the thread-reply listener (handlers/messages.ts) to find which
+// open call a reply belongs to. Only matches open calls, so chatter in a
+// thread after a call has locked or resolved is never mistaken for a
+// prediction.
+export async function getCallByThread(channelId: string, threadTs: string): Promise<Call | null> {
+  const { rows } = await pool.query(
+    `SELECT * FROM calls WHERE channel_id = $1 AND thread_ts = $2 AND status = 'open'`,
+    [channelId, threadTs],
+  );
+  return rows[0] ? rowToCall(rows[0]) : null;
+}
+
 export async function listCallsForUser(workspaceId: string, userId: string): Promise<Call[]> {
   const { rows } = await pool.query(
     `SELECT DISTINCT c.*

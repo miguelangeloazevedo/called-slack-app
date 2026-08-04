@@ -36,9 +36,12 @@
         "chat:write",
         "chat:write.public",
         "channels:read",
+        "channels:history",
         "groups:read",
+        "groups:history",
         "users:read",
-        "im:write"
+        "im:write",
+        "reactions:write"
       ]
     }
   },
@@ -47,6 +50,12 @@
     "token_rotation_enabled": false,
     "interactivity": {
       "is_enabled": true
+    },
+    "event_subscriptions": {
+      "bot_events": [
+        "message.channels",
+        "message.groups"
+      ]
     },
     "org_deploy_enabled": false
   }

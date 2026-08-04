@@ -7,6 +7,7 @@ import { registerCommandHandlers } from "./handlers/commands";
 import { registerActionHandlers } from "./handlers/actions";
 import { registerViewSubmissionHandlers } from "./handlers/viewSubmissions";
 import { registerShortcutHandlers } from "./handlers/shortcuts";
+import { registerMessageHandlers } from "./handlers/messages";
 import { startReminders } from "./reminders";
 
 const scopes = (process.env.SLACK_SCOPES ?? "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -69,6 +70,7 @@ registerCommandHandlers(app);
 registerActionHandlers(app);
 registerViewSubmissionHandlers(app);
 registerShortcutHandlers(app);
+registerMessageHandlers(app);
 
 (async () => {
   // Port is already wired in via installerOptions.port above; app.start()

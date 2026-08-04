@@ -38,6 +38,17 @@ export function openCallBlocks(call: Call): KnownBlock[] {
     elements: [{ type: "mrkdwn", text: `Winnings: ${call.winnings}` }],
   });
 
+  // The short id is what /calledit join/lock/resolve actually take as an
+  // argument; without showing it here, using those commands meant running
+  // /calledit open or /calledit mine first just to find the id.
+  const shortId = call.id.slice(0, 8);
+  blocks.push({
+    type: "context",
+    elements: [
+      { type: "mrkdwn", text: `ID: \`${shortId}\`  ·  join with \`/calledit join ${shortId}\`` },
+    ],
+  });
+
   if (call.entryMode === "channel") {
     blocks.push({
       type: "actions",

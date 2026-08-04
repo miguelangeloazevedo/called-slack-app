@@ -1,6 +1,6 @@
 import type { App } from "@slack/bolt";
 import {
-  getCall,
+  findCallByShortId,
   listCallsForUser,
   listOpenCallsInChannel,
   listPredictions,
@@ -60,7 +60,7 @@ export function registerCommandHandlers(app: App) {
       }
 
       case "lock": {
-        const call = await findByShortId(command.team_id, command.user_id, arg);
+        const call = await findCallByShortId(command.team_id, arg);
         if (!call) return ephemeralNotFound(client, command);
         await lockCall(call.id);
         await recordAuditEvent(call.id, command.user_id, "locked", "manual lock");
@@ -77,7 +77,7 @@ export function registerCommandHandlers(app: App) {
       }
 
       case "resolve": {
-        const call = await findByShortId(command.team_id, command.user_id, arg);
+        const call = await findCallByShortId(command.team_id, arg);
         if (!call) return ephemeralNotFound(client, command);
         await client.views.open({
           trigger_id: body.trigger_id,
@@ -87,21 +87,18 @@ export function registerCommandHandlers(app: App) {
       }
 
       case "join": {
-        const call = await findByShortId(command.team_id, command.user_id, arg);
+        const call = await findCallByShortId(command.team_id, arg);
         if (!call) return ephemeralNotFound(client, command);
-        // The actual pick is collected in a follow-up ephemeral prompt
-        // rather than as a command argument, so it isn't limited to a
-        // single line pasted after the id.
+        // The actual pick is collected in a follow-up reply rather than as
+        // a command argument, so it isn't limited to a single line pasted
+        // after the id. handlers/messages.ts is what actually turns that
+        // reply into a recorded prediction.
         await client.chat.postEphemeral({
           channel: call.channelId,
           user: command.user_id,
           text: `What's your call on "${call.question}"? Reply in this thread and I'll record it.`,
           thread_ts: call.threadTs ?? undefined,
         });
-        // A message-shortcut-driven or modal-driven capture is the fuller
-        // version of this; recording straight from the ephemeral reply
-        // requires a message listener scoped to that thread, added in a
-        // follow-up pass once the rest of the lifecycle is solid.
         await recordAuditEvent(call.id, command.user_id, "joined", "via /calledit join");
         return;
       }
@@ -114,16 +111,6 @@ export function registerCommandHandlers(app: App) {
         });
     }
   });
-}
-
-async function findByShortId(workspaceId: string, userId: string, shortId: string) {
-  if (!shortId) return null;
-  // Short ids shown in Slack are the first 8 characters of the UUID; this
-  // is a linear scan over the user's own calls rather than a dedicated
-  // lookup, which is fine at this project's scale and avoids a second
-  // index for something users rarely type.
-  const calls = await listCallsForUser(workspaceId, userId);
-  return calls.find((c) => c.id.startsWith(shortId)) ?? (await getCall(shortId)) ?? null;
 }
 
 async function ephemeralNotFound(client: App["client"], command: { channel_id: string; user_id: string }) {
