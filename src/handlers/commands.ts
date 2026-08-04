@@ -17,6 +17,14 @@ export function registerCommandHandlers(app: App) {
     const [sub, ...rest] = command.text.trim().split(/\s+/).filter(Boolean);
     const arg = rest.join(" ");
 
+    // Temporary: nothing here logs on success normally, which made a
+    // silent failure indistinguishable from "never dispatched at all".
+    // Remove once the join issue is confirmed fixed.
+    console.log(
+      `[commands] raw=${JSON.stringify(command.text)} sub=${JSON.stringify(sub)} arg=${JSON.stringify(arg)} channel=${command.channel_id}`,
+    );
+
+    try {
     switch (sub) {
       case undefined:
         await client.views.open({
@@ -124,6 +132,17 @@ export function registerCommandHandlers(app: App) {
           user: command.user_id,
           text: `Unrecognised subcommand "${sub}". Try /calledit, /calledit mine, /calledit open, /calledit lock <id>, /calledit resolve <id>, or /calledit join <id>.`,
         });
+    }
+    } catch (err) {
+      // Temporary, alongside the log above: make absolutely sure nothing
+      // in this handler can fail silently while diagnosing the join
+      // command going quiet with no error and no response.
+      console.error(`[commands] handler threw for sub=${JSON.stringify(sub)} arg=${JSON.stringify(arg)}`, err);
+      await client.chat.postEphemeral({
+        channel: command.channel_id,
+        user: command.user_id,
+        text: `Something went wrong handling that: ${err instanceof Error ? err.message : String(err)}`,
+      });
     }
   });
 }
