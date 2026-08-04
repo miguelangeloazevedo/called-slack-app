@@ -79,14 +79,23 @@ token (`xapp-...`) with `connections:write`, and put it in `.env` as
 
 ## What's built vs. what's stubbed
 
-Built and working: the full call lifecycle (open, predict, lock, resolve),
-Postgres-backed multi-workspace installs, the "I'll enter picks" and "post to
-channel" modes from the new-call modal, the reviewer/criteria split, name
-resolution via Slack's native user picker, auto-lock on a cron-based poller
-(survives restarts, since the deadline lives in Postgres rather than an
-in-process timer), the custom OAuth install page, and Paddle entitlement
+Built and working: the full call lifecycle (open, predict, lock, resolve,
+cancel), Postgres-backed multi-workspace installs, the "I'll enter picks" and
+"post to channel" modes from the new-call modal, the reviewer/criteria split,
+name resolution via Slack's native user picker, auto-lock on a cron-based
+poller (survives restarts, since the deadline lives in Postgres rather than
+an in-process timer), the custom OAuth install page, and Paddle entitlement
 handling with the verified-install-or-hint reconciliation pattern proven on
 Ledger.
+
+`/calledit lock` and `/calledit cancel` are restricted to a call's creator or
+reviewer; `/calledit resolve` is restricted to the reviewer specifically
+(which defaults to the creator when none was set explicitly, so one check
+covers both). The question and deadline are never editable, `/calledit
+cancel <id>` is the only way to void a call, there is no edit path. Every
+action (created, predicted, locked, resolved, cancelled, and so on) is
+recorded via `recordAuditEvent` and gets rendered as a plain-language trail
+appended to the settle message posted in the thread when a call resolves.
 
 Not yet built: the "post to channel" audience actually posting to a specific
 list of invited people versus fully open, consequence-pending tracking and
