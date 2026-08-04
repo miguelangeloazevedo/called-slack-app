@@ -21,6 +21,7 @@ export type CallStatus =
 
 export interface Call {
   id: string;
+  seq: number; // per-workspace, human-readable: shown and typed as #N.
   workspaceId: string;
   channelId: string;
   threadTs: string | null; // set once the opening card is posted; every later

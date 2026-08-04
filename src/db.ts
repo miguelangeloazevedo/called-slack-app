@@ -39,6 +39,36 @@ CREATE TABLE IF NOT EXISTS calls (
 -- same way the CREATE TABLE IF NOT EXISTS statements above are.
 ALTER TABLE calls ALTER COLUMN criteria DROP NOT NULL;
 
+-- Readable per-workspace call numbers (#1, #2, ...) instead of a UUID
+-- fragment, used in /calledit join/lock/resolve and shown on every card.
+-- call_counters hands out the next number atomically per workspace (see
+-- createCall in this file); everything below backfills any calls created
+-- before this column existed and keeps the whole block safe to re-run on
+-- every deploy, same convention as the rest of this file.
+CREATE TABLE IF NOT EXISTS call_counters (
+  workspace_id TEXT PRIMARY KEY,
+  next_seq     INTEGER NOT NULL DEFAULT 1
+);
+
+ALTER TABLE calls ADD COLUMN IF NOT EXISTS seq INTEGER;
+
+UPDATE calls c
+   SET seq = sub.rn
+  FROM (
+    SELECT id, ROW_NUMBER() OVER (PARTITION BY workspace_id ORDER BY created_at) AS rn
+      FROM calls
+     WHERE seq IS NULL
+  ) sub
+ WHERE c.id = sub.id AND c.seq IS NULL;
+
+INSERT INTO call_counters (workspace_id, next_seq)
+SELECT workspace_id, MAX(seq) + 1 FROM calls WHERE seq IS NOT NULL GROUP BY workspace_id
+ON CONFLICT (workspace_id) DO UPDATE SET next_seq = GREATEST(call_counters.next_seq, EXCLUDED.next_seq);
+
+ALTER TABLE calls ALTER COLUMN seq SET NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS calls_workspace_seq_idx ON calls (workspace_id, seq);
+
 CREATE INDEX IF NOT EXISTS calls_workspace_status_idx ON calls (workspace_id, status);
 CREATE INDEX IF NOT EXISTS calls_closes_at_idx ON calls (closes_at) WHERE status = 'open';
 
@@ -75,6 +105,7 @@ CREATE TABLE IF NOT EXISTS billing_entitlements (
 function rowToCall(r: any): Call {
   return {
     id: r.id,
+    seq: Number(r.seq),
     workspaceId: r.workspace_id,
     channelId: r.channel_id,
     threadTs: r.thread_ts,
@@ -117,11 +148,24 @@ export async function createCall(input: {
   winnings: string;
   closesAt: Date;
 }): Promise<Call> {
+  // Atomic get-and-increment: the INSERT succeeds outright for a
+  // workspace's first call (seq starts at 1, counter left at 2); every
+  // call after that hits the ON CONFLICT branch, which hands back the
+  // counter's current value and bumps it in the same statement, so two
+  // calls created at once can't collide on the same number.
+  const { rows: seqRows } = await pool.query(
+    `INSERT INTO call_counters (workspace_id, next_seq) VALUES ($1, 2)
+     ON CONFLICT (workspace_id) DO UPDATE SET next_seq = call_counters.next_seq + 1
+     RETURNING next_seq - 1 AS seq`,
+    [input.workspaceId],
+  );
+  const seq = seqRows[0].seq as number;
+
   const { rows } = await pool.query(
     `INSERT INTO calls
        (workspace_id, channel_id, question, criteria, creator_id, reviewer_id,
-        entry_mode, visibility, winnings, closes_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        entry_mode, visibility, winnings, closes_at, seq)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      RETURNING *`,
     [
       input.workspaceId,
@@ -134,6 +178,7 @@ export async function createCall(input: {
       input.visibility,
       input.winnings,
       input.closesAt,
+      seq,
     ],
   );
   return rowToCall(rows[0]);
@@ -148,25 +193,20 @@ export async function getCall(callId: string): Promise<Call | null> {
   return rows[0] ? rowToCall(rows[0]) : null;
 }
 
-// Looks a call up by its short id (the first 8 characters of the UUID,
-// shown on every card and in `mine`/`open` listings) across the whole
-// workspace, not just calls the caller happens to already be attached to.
-// An earlier version of the /calledit join/lock/resolve lookup only
-// searched the caller's own calls and fell back to an exact full-UUID
-// match, which meant the entire point of "join a call you weren't
-// originally part of" silently never worked: the short id never matched
-// listCallsForUser's results for someone uninvolved, and never matched the
-// exact-UUID fallback either, since a short id is a prefix, not a full
-// UUID.
-export async function findCallByShortId(workspaceId: string, shortId: string): Promise<Call | null> {
-  // Guard against an empty id: with the LIKE below, '' || '%' is just '%',
-  // which would match every call in the workspace and silently return
-  // whichever was created most recently, exactly wrong for a lock/resolve/
-  // join command run without an id.
-  if (!shortId) return null;
+// Looks a call up by its per-workspace number (shown on every card and in
+// `mine`/`open` listings as #N) across the whole workspace, not just calls
+// the caller happens to already be attached to. An earlier version of the
+// /calledit join/lock/resolve lookup only searched the caller's own calls
+// and fell back to an exact full-UUID match against a short id, which
+// meant the entire point of "join a call you weren't originally part of"
+// silently never worked. This version, and the id scheme itself
+// (previously an 8-character UUID fragment, hard to read or type), were
+// both replaced together.
+export async function findCallBySeq(workspaceId: string, seq: number): Promise<Call | null> {
+  if (!Number.isFinite(seq)) return null;
   const { rows } = await pool.query(
-    `SELECT * FROM calls WHERE workspace_id = $1 AND id::text LIKE $2 || '%' ORDER BY created_at DESC LIMIT 1`,
-    [workspaceId, shortId],
+    `SELECT * FROM calls WHERE workspace_id = $1 AND seq = $2`,
+    [workspaceId, seq],
   );
   return rows[0] ? rowToCall(rows[0]) : null;
 }
@@ -184,13 +224,20 @@ export async function getCallByThread(channelId: string, threadTs: string): Prom
 }
 
 export async function listCallsForUser(workspaceId: string, userId: string): Promise<Call[]> {
+  // Postgres requires every ORDER BY expression on a SELECT DISTINCT query
+  // to appear in the select list; (c.status = 'open') on its own doesn't
+  // count even though c.status does via c.*. This threw a 42P10 error on
+  // every single call to /calledit mine, the command never worked at all
+  // until this was caught live. Naming the expression (is_open) and adding
+  // it to the select list satisfies that rule; rowToCall below just ignores
+  // the extra column.
   const { rows } = await pool.query(
-    `SELECT DISTINCT c.*
+    `SELECT DISTINCT c.*, (c.status = 'open') AS is_open
        FROM calls c
        LEFT JOIN predictions p ON p.call_id = c.id AND p.user_id = $2
       WHERE c.workspace_id = $1
         AND (c.creator_id = $2 OR c.reviewer_id = $2 OR p.user_id = $2)
-      ORDER BY (c.status = 'open') DESC, c.closes_at ASC`,
+      ORDER BY is_open DESC, c.closes_at ASC`,
     [workspaceId, userId],
   );
   return rows.map(rowToCall);

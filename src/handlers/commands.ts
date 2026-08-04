@@ -1,6 +1,6 @@
 import type { App } from "@slack/bolt";
 import {
-  findCallByShortId,
+  findCallBySeq,
   listCallsForUser,
   listOpenCallsInChannel,
   listPredictions,
@@ -35,10 +35,10 @@ export function registerCommandHandlers(app: App) {
         const calls = await listCallsForUser(command.team_id, command.user_id);
         const text = calls.length
           ? calls
-              .map((c) => {
-                const shortId = c.id.slice(0, 8);
-                return `*${c.status.toUpperCase()}* ${c.question}\n   ↳ \`/calledit join ${shortId}\` to add or update your call`;
-              })
+              .map(
+                (c) =>
+                  `*${c.status.toUpperCase()}* #${c.seq} ${c.question}\n   ↳ \`/calledit join ${c.seq}\` to add or update your call`,
+              )
               .join("\n\n")
           : "You haven't made or joined any calls yet.";
         await client.chat.postEphemeral({
@@ -52,7 +52,7 @@ export function registerCommandHandlers(app: App) {
       case "open": {
         const calls = await listOpenCallsInChannel(command.channel_id);
         const text = calls.length
-          ? calls.map((c) => `${c.question} (\`${c.id.slice(0, 8)}\`)`).join("\n")
+          ? calls.map((c) => `#${c.seq} ${c.question}`).join("\n")
           : "No calls are open in this channel right now.";
         await client.chat.postEphemeral({
           channel: command.channel_id,
@@ -63,7 +63,7 @@ export function registerCommandHandlers(app: App) {
       }
 
       case "lock": {
-        const call = await findCallByShortId(command.team_id, arg);
+        const call = await findCallBySeq(command.team_id, Number(arg));
         if (!call) return ephemeralNotFound(client, command);
         await lockCall(call.id);
         await recordAuditEvent(call.id, command.user_id, "locked", "manual lock");
@@ -80,7 +80,7 @@ export function registerCommandHandlers(app: App) {
       }
 
       case "resolve": {
-        const call = await findCallByShortId(command.team_id, arg);
+        const call = await findCallBySeq(command.team_id, Number(arg));
         if (!call) return ephemeralNotFound(client, command);
         await client.views.open({
           trigger_id: body.trigger_id,
@@ -90,7 +90,7 @@ export function registerCommandHandlers(app: App) {
       }
 
       case "join": {
-        const call = await findCallByShortId(command.team_id, arg);
+        const call = await findCallBySeq(command.team_id, Number(arg));
         if (!call) return ephemeralNotFound(client, command);
         // The actual pick is collected in a follow-up reply rather than as
         // a command argument, so it isn't limited to a single line pasted
@@ -120,6 +120,6 @@ async function ephemeralNotFound(client: App["client"], command: { channel_id: s
   await client.chat.postEphemeral({
     channel: command.channel_id,
     user: command.user_id,
-    text: "Couldn't find that call. Use /calledit mine to see the ids of your calls.",
+    text: "Couldn't find that call. Use /calledit mine to see your call numbers.",
   });
 }
