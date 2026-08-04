@@ -266,6 +266,14 @@ export async function lockCall(callId: string): Promise<Call> {
   return rowToCall(rows[0]);
 }
 
+export async function cancelCall(callId: string): Promise<Call> {
+  const { rows } = await pool.query(
+    `UPDATE calls SET status = 'cancelled' WHERE id = $1 RETURNING *`,
+    [callId],
+  );
+  return rowToCall(rows[0]);
+}
+
 export async function resolveCall(
   callId: string,
   input: { resultText: string; evidenceText: string; resolvedBy: string },

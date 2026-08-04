@@ -1,5 +1,6 @@
 import type { App } from "@slack/bolt";
 import {
+  cancelCall,
   findCallBySeq,
   listCallsForUser,
   listOpenCallsInChannel,
@@ -8,8 +9,8 @@ import {
   recordAuditEvent,
 } from "../db";
 import { buildNewCallModal, buildResolveModal, DEFAULT_PROXY_ROWS } from "../modals";
-import { lockNoticeBlocks, openCallsOverviewBlocks } from "../blocks";
-import type { Prediction } from "../types";
+import { cancelNoticeBlocks, lockNoticeBlocks, openCallsOverviewBlocks } from "../blocks";
+import type { Call, Prediction } from "../types";
 
 export function registerCommandHandlers(app: App) {
   app.command("/calledit", async ({ ack, command, client, body }) => {
@@ -86,6 +87,14 @@ export function registerCommandHandlers(app: App) {
           if (!arg) return ephemeralUsage(client, command, "lock");
           const call = await findCallBySeq(command.team_id, Number(arg));
           if (!call) return ephemeralNotFound(client, command);
+          if (!isCreatorOrReviewer(call, command.user_id)) {
+            await client.chat.postEphemeral({
+              channel: command.channel_id,
+              user: command.user_id,
+              text: `Only the person who made #${call.seq}, or its reviewer <@${call.reviewerId}>, can lock it early.`,
+            });
+            return;
+          }
           if (call.status !== "open") {
             await client.chat.postEphemeral({
               channel: command.channel_id,
@@ -112,6 +121,18 @@ export function registerCommandHandlers(app: App) {
           if (!arg) return ephemeralUsage(client, command, "resolve");
           const call = await findCallBySeq(command.team_id, Number(arg));
           if (!call) return ephemeralNotFound(client, command);
+          // reviewerId defaults to creatorId at creation time (see
+          // viewSubmissions.ts), so this one check covers both "the
+          // reviewer resolves it" and "the creator resolves it, since no
+          // separate reviewer was set" without needing two branches.
+          if (call.reviewerId !== command.user_id) {
+            await client.chat.postEphemeral({
+              channel: command.channel_id,
+              user: command.user_id,
+              text: `Only the reviewer, <@${call.reviewerId}>, can resolve #${call.seq}.`,
+            });
+            return;
+          }
           if (call.status === "resolved") {
             await client.chat.postEphemeral({
               channel: command.channel_id,
@@ -120,9 +141,55 @@ export function registerCommandHandlers(app: App) {
             });
             return;
           }
+          if (call.status === "cancelled") {
+            await client.chat.postEphemeral({
+              channel: command.channel_id,
+              user: command.user_id,
+              text: `#${call.seq} was cancelled, there's nothing to resolve.`,
+            });
+            return;
+          }
           await client.views.open({
             trigger_id: body.trigger_id,
             view: buildResolveModal(call.id, call.question),
+          });
+          return;
+        }
+
+        case "cancel": {
+          if (!arg) return ephemeralUsage(client, command, "cancel");
+          const call = await findCallBySeq(command.team_id, Number(arg));
+          if (!call) return ephemeralNotFound(client, command);
+          if (!isCreatorOrReviewer(call, command.user_id)) {
+            await client.chat.postEphemeral({
+              channel: command.channel_id,
+              user: command.user_id,
+              text: `Only the person who made #${call.seq}, or its reviewer <@${call.reviewerId}>, can cancel it.`,
+            });
+            return;
+          }
+          if (call.status === "resolved" || call.status === "cancelled") {
+            await client.chat.postEphemeral({
+              channel: command.channel_id,
+              user: command.user_id,
+              text: `#${call.seq} is already *${call.status}*, nothing to cancel.`,
+            });
+            return;
+          }
+          await cancelCall(call.id);
+          await recordAuditEvent(call.id, command.user_id, "cancelled", "via /calledit cancel");
+          if (call.threadTs) {
+            await client.chat.postMessage({
+              channel: call.channelId,
+              thread_ts: call.threadTs,
+              blocks: cancelNoticeBlocks(call),
+              text: "Call cancelled.",
+            });
+          }
+          await client.chat.postEphemeral({
+            channel: command.channel_id,
+            user: command.user_id,
+            text: `#${call.seq} cancelled. The question and deadline can't be edited, post a new /calledit if you need to change either.`,
           });
           return;
         }
@@ -189,7 +256,7 @@ export function registerCommandHandlers(app: App) {
           await client.chat.postEphemeral({
             channel: command.channel_id,
             user: command.user_id,
-            text: `Unrecognised subcommand "${sub}". Try /calledit, /calledit mine, /calledit open, /calledit lock <id>, /calledit resolve <id>, or /calledit join <id>.`,
+            text: `Unrecognised subcommand "${sub}". Try /calledit, /calledit mine, /calledit open, /calledit lock <id>, /calledit resolve <id>, /calledit join <id>, or /calledit cancel <id>.`,
           });
       }
     } catch (err) {
@@ -220,11 +287,15 @@ async function ephemeralNotFound(client: App["client"], command: { channel_id: s
 async function ephemeralUsage(
   client: App["client"],
   command: { channel_id: string; user_id: string },
-  sub: "lock" | "resolve" | "join",
+  sub: "lock" | "resolve" | "join" | "cancel",
 ) {
   await client.chat.postEphemeral({
     channel: command.channel_id,
     user: command.user_id,
     text: `\`/calledit ${sub}\` needs a call number, e.g. \`/calledit ${sub} 3\`. Run \`/calledit mine\` to see yours.`,
   });
+}
+
+function isCreatorOrReviewer(call: Call, userId: string): boolean {
+  return userId === call.creatorId || userId === call.reviewerId;
 }

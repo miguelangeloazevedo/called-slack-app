@@ -1,6 +1,7 @@
 import type { App } from "@slack/bolt";
 import {
   createCall,
+  listAuditEvents,
   listPredictions,
   recordAuditEvent,
   resolveCall,
@@ -119,11 +120,14 @@ export function registerViewSubmissionHandlers(app: App) {
     await recordAuditEvent(call.id, body.user.id, "resolved", resultText);
 
     if (call.threadTs) {
-      const predictions = await listPredictions(call.id);
+      const [predictions, auditEvents] = await Promise.all([
+        listPredictions(call.id),
+        listAuditEvents(call.id),
+      ]);
       await client.chat.postMessage({
         channel: call.channelId,
         thread_ts: call.threadTs,
-        blocks: settleBlocks(call, predictions),
+        blocks: settleBlocks(call, predictions, auditEvents),
         text: `Result: ${resultText}`,
       });
     }

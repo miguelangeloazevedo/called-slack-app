@@ -1,5 +1,5 @@
 import type { KnownBlock } from "@slack/bolt";
-import type { Call, Prediction } from "./types";
+import type { AuditEvent, Call, Prediction } from "./types";
 
 // Block Kit builders for every card Calledit posts. Kept separate from the
 // handlers that call them so the visual shape of a call is defined in one
@@ -150,7 +150,58 @@ export function lockNoticeBlocks(call: Call, predictions: Prediction[]): KnownBl
   ];
 }
 
-export function settleBlocks(call: Call, predictions: Prediction[]): KnownBlock[] {
+export function cancelNoticeBlocks(call: Call): KnownBlock[] {
+  return [
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: `:no_entry_sign: *CALL CANCELLED*\n${call.question}` },
+    },
+    {
+      type: "context",
+      elements: [{ type: "mrkdwn", text: "This call is void. No result will be recorded." }],
+    },
+  ];
+}
+
+// One line per audit_events row, in plain language. This is what makes the
+// "visible audit trail" the site describes actually visible: the events
+// were always being recorded (recordAuditEvent, called from every handler
+// that touches a call), but nothing ever read listAuditEvents back out
+// until now, so the log existed only in Postgres, never in Slack.
+function describeAuditEvent(e: AuditEvent): string {
+  const who = e.actorId ? `<@${e.actorId}>` : "Calledit";
+  const verbs: Record<AuditEvent["kind"], string> = {
+    created: "opened this call",
+    predicted: "called it",
+    prediction_changed: "updated their call",
+    joined: "joined the call",
+    declined: "declined to call it",
+    locked: e.actorId ? "locked the call" : "auto-locked the call at the deadline",
+    resolved: "resolved the call",
+    consequence_marked_done: "marked the consequence done",
+    cancelled: "cancelled the call",
+  };
+  const when = formatDeadline(e.createdAt);
+  const detail = e.detail ? ` (${e.detail})` : "";
+  return `${who} ${verbs[e.kind]}${detail} — ${when}`;
+}
+
+export function auditTrailBlocks(events: AuditEvent[]): KnownBlock[] {
+  if (!events.length) return [];
+  return [
+    { type: "divider" },
+    {
+      type: "context",
+      elements: [{ type: "mrkdwn", text: `*Audit trail*\n${events.map(describeAuditEvent).join("\n")}` }],
+    },
+  ];
+}
+
+export function settleBlocks(
+  call: Call,
+  predictions: Prediction[],
+  auditEvents: AuditEvent[] = [],
+): KnownBlock[] {
   const lines = predictions.map((p) => `<@${p.userId}> called: ${p.value}`).join("\n");
 
   return [
@@ -172,5 +223,6 @@ export function settleBlocks(call: Call, predictions: Prediction[]): KnownBlock[
         { type: "mrkdwn", text: `Settled by <@${call.resolvedBy}>` },
       ],
     },
+    ...auditTrailBlocks(auditEvents),
   ];
 }
