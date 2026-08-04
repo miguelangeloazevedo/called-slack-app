@@ -1,37 +1,56 @@
 import type { ModalView } from "@slack/bolt";
 
 // The "new call" modal. Deliberately loose rather than prescriptive: no
-// forced format picker, no pre-enumerated options list. Question and
-// criteria are the only two required fields; picks are free text, either
-// entered by the creator (proxy mode, for when you're going round the
-// room) or left for the channel to fill in themselves.
+// forced format picker, no pre-enumerated options list. Question is the
+// only field that's always required; picks are free text, either entered
+// by the creator (proxy mode, for when you're going round the room) or
+// left for the channel to fill in themselves.
 //
-// Slack's block system can't conditionally show/hide blocks without a
-// round trip, so proxy rows are rendered directly into the view and grown
-// by re-calling this builder with a larger `proxyRowCount` in response to
-// the "add person" button (see handlers/actions.ts).
+// Reviewer and criteria are both opt-in, added via a button rather than
+// shown as fields up front, to keep the default view small. Slack's Block
+// Kit only allows true side-by-side layout for elements inside an
+// "actions" block (buttons, a datepicker, selects, and so on); "input"
+// blocks (text fields, the users_select pickers used for Person N) are
+// always full width, one per row, this is a platform limit, not a choice
+// made here. That's why "+ Add person" and "+ Reviewer" can sit side by
+// side (both buttons), and "+ Add acceptance criteria" and the "Closed"
+// datepicker can sit side by side (button + datepicker), but Person N and
+// Their call cannot.
+//
+// Slack's block system also can't conditionally show/hide blocks without a
+// round trip, so proxy rows and the reviewer/criteria fields are rendered
+// directly into the view and grown or revealed by re-calling this builder
+// with updated state in response to a button (see handlers/actions.ts).
 
 export const NEW_CALL_CALLBACK_ID = "new_call_submit";
-const DEFAULT_PROXY_ROWS = 3;
+export const DEFAULT_PROXY_ROWS = 2;
 
 interface NewCallModalState {
   channelId: string;
   entryMode: "proxy" | "channel";
   proxyRowCount: number;
+  showReviewer: boolean;
+  showCriteria: boolean;
 }
 
 export function buildNewCallModal(state: NewCallModalState): ModalView {
-  const { channelId, entryMode, proxyRowCount } = state;
+  const { channelId, entryMode, proxyRowCount, showReviewer, showCriteria } = state;
 
   const proxyRowBlocks =
     entryMode === "proxy"
       ? Array.from({ length: proxyRowCount }, (_, i) => proxyRowBlock(i)).flat()
       : [];
 
+  const reviewerButton = {
+    type: "button" as const,
+    action_id: "add_reviewer",
+    text: { type: "plain_text" as const, text: "+ Reviewer" },
+  };
+
   return {
     type: "modal",
     callback_id: NEW_CALL_CALLBACK_ID,
-    private_metadata: JSON.stringify({ channelId, entryMode, proxyRowCount }),
+    private_metadata: JSON.stringify({ channelId, entryMode, proxyRowCount, showReviewer, showCriteria }),
     title: { type: "plain_text", text: "New call" },
     submit: { type: "plain_text", text: "Create call" },
     close: { type: "plain_text", text: "Cancel" },
@@ -67,25 +86,17 @@ export function buildNewCallModal(state: NewCallModalState): ModalView {
       },
       ...(entryMode === "proxy"
         ? [
-            {
-              type: "context" as const,
-              elements: [
-                {
-                  type: "mrkdwn" as const,
-                  text: "Names resolve against the workspace. Anyone else can still add their own call later, until it locks.",
-                },
-              ],
-            },
             ...proxyRowBlocks,
             {
               type: "actions" as const,
-              block_id: "add_proxy_row",
+              block_id: "proxy_actions",
               elements: [
                 {
                   type: "button" as const,
                   action_id: "add_proxy_row",
                   text: { type: "plain_text" as const, text: "+ Add person" },
                 },
+                ...(showReviewer ? [] : [reviewerButton]),
               ],
             },
           ]
@@ -99,37 +110,67 @@ export function buildNewCallModal(state: NewCallModalState): ModalView {
                 },
               ],
             },
+            ...(showReviewer
+              ? []
+              : [
+                  {
+                    type: "actions" as const,
+                    block_id: "channel_actions",
+                    elements: [reviewerButton],
+                  },
+                ]),
           ]),
+      ...(showReviewer
+        ? [
+            {
+              type: "input" as const,
+              block_id: "reviewer",
+              optional: true,
+              label: { type: "plain_text" as const, text: "Reviewer (optional)" },
+              element: {
+                type: "users_select" as const,
+                action_id: "value",
+                placeholder: { type: "plain_text" as const, text: "Defaults to you" },
+              },
+            },
+          ]
+        : []),
       {
-        type: "input",
-        block_id: "reviewer",
-        optional: true,
-        label: { type: "plain_text", text: "Reviewer (optional)" },
-        element: {
-          type: "users_select",
-          action_id: "value",
-          placeholder: { type: "plain_text", text: "Defaults to you" },
-        },
+        type: "actions",
+        block_id: "closing_row",
+        elements: [
+          ...(showCriteria
+            ? []
+            : [
+                {
+                  type: "button" as const,
+                  action_id: "add_criteria",
+                  text: { type: "plain_text" as const, text: "+ Add acceptance criteria" },
+                },
+              ]),
+          {
+            type: "datepicker" as const,
+            action_id: "closes_at",
+            placeholder: { type: "plain_text" as const, text: "Closed" },
+            initial_date: defaultCloseDate(),
+          },
+        ],
       },
-      {
-        type: "input",
-        block_id: "criteria",
-        label: { type: "plain_text", text: "Criteria" },
-        element: {
-          type: "plain_text_input",
-          action_id: "value",
-          placeholder: { type: "plain_text", text: "Stripe customers, 31 Aug" },
-        },
-      },
-      {
-        type: "input",
-        block_id: "closes_at",
-        label: { type: "plain_text", text: "Closes" },
-        element: {
-          type: "datetimepicker",
-          action_id: "value",
-        },
-      },
+      ...(showCriteria
+        ? [
+            {
+              type: "input" as const,
+              block_id: "criteria",
+              optional: true,
+              label: { type: "plain_text" as const, text: "Criteria (optional)" },
+              element: {
+                type: "plain_text_input" as const,
+                action_id: "value",
+                placeholder: { type: "plain_text" as const, text: "Stripe customers, 31 Aug" },
+              },
+            },
+          ]
+        : []),
       {
         type: "input",
         block_id: "visibility",
@@ -197,6 +238,19 @@ export function nextProxyRowCount(currentCount: number): number {
   // Slack modals cap at 100 blocks; well below that in practice, but worth
   // a ceiling so a runaway click can't break the view.
   return Math.min(currentCount + 1, 20);
+}
+
+// Every deadline resolves to 17:00, never a specific time of day (see
+// handlers/viewSubmissions.ts, which appends T17:00:00Z to whatever date
+// comes back from this picker). Defaulting the picker itself to a week out
+// keeps the field practically always populated, since Slack's Block Kit
+// doesn't support a "required" flag on datepickers living in an actions
+// block the way it does for input blocks, there is no built-in inline
+// error if this is left untouched and blank.
+function defaultCloseDate(): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + 7);
+  return d.toISOString().slice(0, 10);
 }
 
 // -- Resolve modal --------------------------------------------------------

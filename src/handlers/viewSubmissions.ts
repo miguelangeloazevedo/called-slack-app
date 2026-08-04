@@ -17,21 +17,36 @@ export function registerViewSubmissionHandlers(app: App) {
       channelId: string;
       entryMode: EntryMode;
       proxyRowCount: number;
+      showReviewer: boolean;
+      showCriteria: boolean;
     };
     const values = view.state.values;
     const creatorId = body.user.id;
 
     const question = values.question?.value?.value?.trim();
+    // Criteria is optional now, revealed via the "+ Add acceptance
+    // criteria" button rather than a field shown up front (see modals.ts).
     const criteria = values.criteria?.value?.value?.trim();
-    const closesAtIso = values.closes_at?.value?.selected_date_time;
+    // The deadline picker is a date-only `datepicker`, not a
+    // `datetimepicker`, living in the "closing_row" actions block
+    // alongside the optional "+ Add acceptance criteria" button, so it
+    // reads back as selected_date (a "YYYY-MM-DD" string), not a unix
+    // timestamp. Every call closes at 17:00 on whatever date is picked,
+    // there is no time-of-day control in this modal.
+    const closesAtDate = values.closing_row?.closes_at?.selected_date;
     const visibility = (values.visibility?.value?.selected_option?.value ?? "sealed_until_close") as Visibility;
     const winnings = values.winnings?.value?.value?.trim() || "Bragging rights";
     const reviewerId = values.reviewer?.value?.selected_user || creatorId;
 
+    // Note: Slack only renders inline field errors (response_action:
+    // "errors") against "input" blocks. closing_row is an "actions" block
+    // (needed for the side-by-side layout), so a missing date here would
+    // not show a nice red message the way a missing question does. The
+    // datepicker ships with a default a week out (see defaultCloseDate in
+    // modals.ts) specifically to make that gap rarely matter in practice.
     const errors: Record<string, string> = {};
     if (!question) errors.question = "This can't be blank.";
-    if (!criteria) errors.criteria = "How will this be settled?";
-    if (!closesAtIso) errors.closes_at = "Pick when predictions close.";
+    if (!closesAtDate) errors.closing_row = "Pick when predictions close.";
 
     if (meta.entryMode === "proxy") {
       const anyRow = Array.from({ length: meta.proxyRowCount }).some(
@@ -47,17 +62,22 @@ export function registerViewSubmissionHandlers(app: App) {
 
     await ack();
 
+    // Every call closes at 17:00 UTC on the picked date; there is no
+    // workspace-timezone lookup here, this is a fixed convention rather
+    // than a per-team setting.
+    const closesAt = new Date(`${closesAtDate}T17:00:00Z`);
+
     const call = await createCall({
       workspaceId: body.team?.id ?? body.user.team_id ?? "",
       channelId: meta.channelId,
       question: question!,
-      criteria: criteria!,
+      criteria: criteria || null,
       creatorId,
       reviewerId,
       entryMode: meta.entryMode,
       visibility,
       winnings,
-      closesAt: new Date(closesAtIso! * 1000),
+      closesAt,
     });
     await recordAuditEvent(call.id, creatorId, "created");
 

@@ -7,7 +7,7 @@ import {
   lockCall,
   recordAuditEvent,
 } from "../db";
-import { buildNewCallModal, buildResolveModal } from "../modals";
+import { buildNewCallModal, buildResolveModal, DEFAULT_PROXY_ROWS } from "../modals";
 import { lockNoticeBlocks } from "../blocks";
 
 export function registerCommandHandlers(app: App) {
@@ -24,7 +24,9 @@ export function registerCommandHandlers(app: App) {
           view: buildNewCallModal({
             channelId: command.channel_id,
             entryMode: "proxy",
-            proxyRowCount: 3,
+            proxyRowCount: DEFAULT_PROXY_ROWS,
+            showReviewer: false,
+            showCriteria: false,
           }),
         });
         return;

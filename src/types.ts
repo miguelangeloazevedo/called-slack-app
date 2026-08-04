@@ -26,7 +26,7 @@ export interface Call {
   threadTs: string | null; // set once the opening card is posted; every later
                              // message (join, lock, reveal, settle) replies here.
   question: string;
-  criteria: string;
+  criteria: string | null; // optional: added via the "+ Add acceptance criteria" button.
   creatorId: string;
   reviewerId: string; // defaults to creatorId if none was set explicitly.
   entryMode: EntryMode;

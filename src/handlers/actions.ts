@@ -6,32 +6,39 @@ interface NewCallPrivateMetadata {
   channelId: string;
   entryMode: "proxy" | "channel";
   proxyRowCount: number;
+  showReviewer: boolean;
+  showCriteria: boolean;
 }
 
 export function registerActionHandlers(app: App) {
-  // Entry-mode toggle buttons re-render the modal in place via views.update,
-  // since Slack has no conditional-visibility block primitive.
+  // Entry-mode toggle buttons, add-person, add-reviewer and add-criteria all
+  // re-render the modal in place via views.update, since Slack has no
+  // conditional-visibility block primitive.
   app.action("entry_mode_proxy", async ({ ack, body, client }) =>
-    switchEntryMode(ack, body, client, "proxy"),
+    rerenderModal(ack, body, client, { entryMode: "proxy" }),
   );
   app.action("entry_mode_channel", async ({ ack, body, client }) =>
-    switchEntryMode(ack, body, client, "channel"),
+    rerenderModal(ack, body, client, { entryMode: "channel" }),
   );
 
   app.action("add_proxy_row", async ({ ack, body, client }) => {
-    await ack();
-    if (body.type !== "block_actions" || !body.view) return;
+    if (body.type !== "block_actions" || !body.view) {
+      await ack();
+      return;
+    }
     const meta = JSON.parse(body.view.private_metadata) as NewCallPrivateMetadata;
-    await client.views.update({
-      view_id: body.view.id,
-      hash: body.view.hash,
-      view: buildNewCallModal({
-        channelId: meta.channelId,
-        entryMode: meta.entryMode,
-        proxyRowCount: nextProxyRowCount(meta.proxyRowCount),
-      }),
+    await rerenderModal(ack, body, client, {
+      proxyRowCount: nextProxyRowCount(meta.proxyRowCount),
     });
   });
+
+  app.action("add_reviewer", async ({ ack, body, client }) =>
+    rerenderModal(ack, body, client, { showReviewer: true }),
+  );
+
+  app.action("add_criteria", async ({ ack, body, client }) =>
+    rerenderModal(ack, body, client, { showCriteria: true }),
+  );
 
   // "Make your call" button on a channel-mode open card. Kept as a light
   // prompt-to-DM rather than a full modal, since the whole point of channel
@@ -54,25 +61,26 @@ export function registerActionHandlers(app: App) {
   });
 }
 
-async function switchEntryMode(
+// Shared re-render helper: reads the current modal's state out of
+// private_metadata, applies a partial patch, and rebuilds the view. Every
+// button in the new-call modal (entry mode, add person, add reviewer, add
+// criteria) is just a different patch through this same path.
+async function rerenderModal(
   ack: () => Promise<void>,
   // Bolt's block_actions body type is awkward to name pointwise here;
   // narrowed with the `body.type !== "block_actions"` guard below instead.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   body: any,
   client: App["client"],
-  entryMode: "proxy" | "channel",
+  patch: Partial<NewCallPrivateMetadata>,
 ) {
   await ack();
   if (body.type !== "block_actions" || !body.view) return;
   const meta = JSON.parse(body.view.private_metadata) as NewCallPrivateMetadata;
+  const next = { ...meta, ...patch };
   await client.views.update({
     view_id: body.view.id,
     hash: body.view.hash,
-    view: buildNewCallModal({
-      channelId: meta.channelId,
-      entryMode,
-      proxyRowCount: meta.proxyRowCount,
-    }),
+    view: buildNewCallModal(next),
   });
 }

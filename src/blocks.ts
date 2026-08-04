@@ -13,18 +13,17 @@ function formatDeadline(d: Date): string {
 }
 
 export function openCallBlocks(call: Call): KnownBlock[] {
+  const fields = [{ type: "mrkdwn" as const, text: `*Closes*\n${formatDeadline(call.closesAt)}` }];
+  if (call.criteria) {
+    fields.push({ type: "mrkdwn" as const, text: `*Judged by*\n${call.criteria}` });
+  }
+
   const blocks: KnownBlock[] = [
     {
       type: "section",
       text: { type: "mrkdwn", text: `:bell: *OPEN CALL*\n${call.question}` },
     },
-    {
-      type: "section",
-      fields: [
-        { type: "mrkdwn", text: `*Closes*\n${formatDeadline(call.closesAt)}` },
-        { type: "mrkdwn", text: `*Judged by*\n${call.criteria}` },
-      ],
-    },
+    { type: "section", fields },
   ];
 
   if (call.reviewerId) {

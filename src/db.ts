@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS calls (
   channel_id    TEXT NOT NULL,
   thread_ts     TEXT,
   question      TEXT NOT NULL,
-  criteria      TEXT NOT NULL,
+  criteria      TEXT,
   creator_id    TEXT NOT NULL,
   reviewer_id   TEXT NOT NULL,
   entry_mode    TEXT NOT NULL CHECK (entry_mode IN ('proxy', 'channel')),
@@ -32,6 +32,12 @@ CREATE TABLE IF NOT EXISTS calls (
   resolved_at   TIMESTAMPTZ,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Criteria became optional (added via a "+ Add acceptance criteria" button
+-- rather than a required field). Running this against a table that's
+-- already nullable is a harmless no-op, so it's safe on every deploy the
+-- same way the CREATE TABLE IF NOT EXISTS statements above are.
+ALTER TABLE calls ALTER COLUMN criteria DROP NOT NULL;
 
 CREATE INDEX IF NOT EXISTS calls_workspace_status_idx ON calls (workspace_id, status);
 CREATE INDEX IF NOT EXISTS calls_closes_at_idx ON calls (closes_at) WHERE status = 'open';
@@ -103,7 +109,7 @@ export async function createCall(input: {
   workspaceId: string;
   channelId: string;
   question: string;
-  criteria: string;
+  criteria: string | null;
   creatorId: string;
   reviewerId: string;
   entryMode: EntryMode;
