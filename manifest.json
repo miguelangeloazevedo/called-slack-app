@@ -1,0 +1,50 @@
+{
+  "display_information": {
+    "name": "Called",
+    "description": "Record, seal and settle predictions in Slack.",
+    "background_color": "#0a0a0a"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "Called",
+      "always_online": true
+    },
+    "slash_commands": [
+      {
+        "command": "/call",
+        "description": "Make a call, or manage one you've already made.",
+        "usage_hint": "[mine | open | lock <id> | resolve <id> | join <id>]",
+        "should_escape": false
+      }
+    ],
+    "shortcuts": [
+      {
+        "name": "Make a prediction",
+        "type": "message",
+        "callback_id": "make_a_prediction",
+        "description": "Turn this message into the question for a new call."
+      }
+    ]
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "commands",
+        "chat:write",
+        "chat:write.public",
+        "channels:read",
+        "groups:read",
+        "users:read",
+        "im:write"
+      ]
+    }
+  },
+  "settings": {
+    "socket_mode_enabled": true,
+    "token_rotation_enabled": false,
+    "interactivity": {
+      "is_enabled": true
+    },
+    "org_deploy_enabled": false
+  }
+}

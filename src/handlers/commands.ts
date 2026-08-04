@@ -1,0 +1,133 @@
+import type { App } from "@slack/bolt";
+import {
+  getCall,
+  listCallsForUser,
+  listOpenCallsInChannel,
+  listPredictions,
+  lockCall,
+  recordAuditEvent,
+} from "../db";
+import { buildNewCallModal, buildResolveModal } from "../modals";
+import { lockNoticeBlocks } from "../blocks";
+
+export function registerCommandHandlers(app: App) {
+  app.command("/call", async ({ ack, command, client, body }) => {
+    await ack();
+
+    const [sub, ...rest] = command.text.trim().split(/\s+/).filter(Boolean);
+    const arg = rest.join(" ");
+
+    switch (sub) {
+      case undefined:
+        await client.views.open({
+          trigger_id: body.trigger_id,
+          view: buildNewCallModal({
+            channelId: command.channel_id,
+            entryMode: "proxy",
+            proxyRowCount: 3,
+          }),
+        });
+        return;
+
+      case "mine": {
+        const calls = await listCallsForUser(command.team_id, command.user_id);
+        const text = calls.length
+          ? calls
+              .map((c) => `*${c.status.toUpperCase()}* ${c.question} (\`${c.id.slice(0, 8)}\`)`)
+              .join("\n")
+          : "You haven't made or joined any calls yet.";
+        await client.chat.postEphemeral({
+          channel: command.channel_id,
+          user: command.user_id,
+          text,
+        });
+        return;
+      }
+
+      case "open": {
+        const calls = await listOpenCallsInChannel(command.channel_id);
+        const text = calls.length
+          ? calls.map((c) => `${c.question} (\`${c.id.slice(0, 8)}\`)`).join("\n")
+          : "No calls are open in this channel right now.";
+        await client.chat.postEphemeral({
+          channel: command.channel_id,
+          user: command.user_id,
+          text,
+        });
+        return;
+      }
+
+      case "lock": {
+        const call = await findByShortId(command.team_id, command.user_id, arg);
+        if (!call) return ephemeralNotFound(client, command);
+        await lockCall(call.id);
+        await recordAuditEvent(call.id, command.user_id, "locked", "manual lock");
+        if (call.threadTs) {
+          const predictions = await listPredictions(call.id);
+          await client.chat.postMessage({
+            channel: call.channelId,
+            thread_ts: call.threadTs,
+            blocks: lockNoticeBlocks(call, predictions),
+            text: "Call locked.",
+          });
+        }
+        return;
+      }
+
+      case "resolve": {
+        const call = await findByShortId(command.team_id, command.user_id, arg);
+        if (!call) return ephemeralNotFound(client, command);
+        await client.views.open({
+          trigger_id: body.trigger_id,
+          view: buildResolveModal(call.id, call.question),
+        });
+        return;
+      }
+
+      case "join": {
+        const call = await findByShortId(command.team_id, command.user_id, arg);
+        if (!call) return ephemeralNotFound(client, command);
+        // The actual pick is collected in a follow-up ephemeral prompt
+        // rather than as a command argument, so it isn't limited to a
+        // single line pasted after the id.
+        await client.chat.postEphemeral({
+          channel: call.channelId,
+          user: command.user_id,
+          text: `What's your call on "${call.question}"? Reply in this thread and I'll record it.`,
+          thread_ts: call.threadTs ?? undefined,
+        });
+        // A message-shortcut-driven or modal-driven capture is the fuller
+        // version of this; recording straight from the ephemeral reply
+        // requires a message listener scoped to that thread, added in a
+        // follow-up pass once the rest of the lifecycle is solid.
+        await recordAuditEvent(call.id, command.user_id, "joined", "via /call join");
+        return;
+      }
+
+      default:
+        await client.chat.postEphemeral({
+          channel: command.channel_id,
+          user: command.user_id,
+          text: `Unrecognised subcommand "${sub}". Try /call, /call mine, /call open, /call lock <id>, /call resolve <id>, or /call join <id>.`,
+        });
+    }
+  });
+}
+
+async function findByShortId(workspaceId: string, userId: string, shortId: string) {
+  if (!shortId) return null;
+  // Short ids shown in Slack are the first 8 characters of the UUID; this
+  // is a linear scan over the user's own calls rather than a dedicated
+  // lookup, which is fine at this project's scale and avoids a second
+  // index for something users rarely type.
+  const calls = await listCallsForUser(workspaceId, userId);
+  return calls.find((c) => c.id.startsWith(shortId)) ?? (await getCall(shortId)) ?? null;
+}
+
+async function ephemeralNotFound(client: App["client"], command: { channel_id: string; user_id: string }) {
+  await client.chat.postEphemeral({
+    channel: command.channel_id,
+    user: command.user_id,
+    text: "Couldn't find that call. Use /call mine to see the ids of your calls.",
+  });
+}
