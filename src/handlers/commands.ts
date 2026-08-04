@@ -35,8 +35,11 @@ export function registerCommandHandlers(app: App) {
         const calls = await listCallsForUser(command.team_id, command.user_id);
         const text = calls.length
           ? calls
-              .map((c) => `*${c.status.toUpperCase()}* ${c.question} (\`${c.id.slice(0, 8)}\`)`)
-              .join("\n")
+              .map((c) => {
+                const shortId = c.id.slice(0, 8);
+                return `*${c.status.toUpperCase()}* ${c.question}\n   ↳ \`/calledit join ${shortId}\` to add or update your call`;
+              })
+              .join("\n\n")
           : "You haven't made or joined any calls yet.";
         await client.chat.postEphemeral({
           channel: command.channel_id,
