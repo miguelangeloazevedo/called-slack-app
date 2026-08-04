@@ -1,4 +1,5 @@
 import type { App } from "@slack/bolt";
+import { hasAccess, trialEndedMessage } from "../db";
 import { buildNewCallModal, DEFAULT_PROXY_ROWS } from "../modals";
 
 // "Make a prediction" message shortcut: right-click any message to turn its
@@ -7,6 +8,16 @@ export function registerShortcutHandlers(app: App) {
   app.shortcut("make_a_prediction", async ({ ack, shortcut, client }) => {
     await ack();
     if (shortcut.type !== "message_action") return;
+
+    const teamId = shortcut.team?.id;
+    if (teamId && !(await hasAccess(teamId))) {
+      await client.chat.postEphemeral({
+        channel: shortcut.channel.id,
+        user: shortcut.user.id,
+        text: trialEndedMessage(teamId),
+      });
+      return;
+    }
 
     const view = buildNewCallModal({
       channelId: shortcut.channel.id,

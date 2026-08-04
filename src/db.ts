@@ -100,7 +100,82 @@ CREATE TABLE IF NOT EXISTS billing_entitlements (
   status             TEXT NOT NULL DEFAULT 'active',
   updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Paddle's subscription payload carries current_billing_period.ends_at; without
+-- storing it, a 'canceling' status had no way to know whether the paid period
+-- someone already bought had actually run out yet. Same gap Ledger closed the
+-- same way. NULL is treated as "unknown, don't cut off" by hasAccess() below,
+-- never as "already ended".
+ALTER TABLE billing_entitlements ADD COLUMN IF NOT EXISTS current_period_end TIMESTAMPTZ;
+
+-- Anyone who completes Slack OAuth could use every command forever, whether
+-- or not they ever paid: nothing checked billing_entitlements anywhere. This
+-- is the trial clock hasAccess() reads; set once, on first install, by
+-- installationStore.storeInstallation (never reset on a re-auth of an
+-- existing row). NULL is grandfathered as unrestricted, same as Ledger,
+-- rather than retroactively locking out installs that predate this column.
+ALTER TABLE slack_installations ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ;
 `;
+
+/** Called once, right after a brand-new slack_installations row is first
+ *  inserted (see installationStore.ts) — never on a later re-auth of an
+ *  existing row, so reinstalling for new scopes doesn't quietly reset an
+ *  already-running or already-consumed trial. */
+export async function startTrial(workspaceId: string): Promise<void> {
+  await pool.query(
+    `UPDATE slack_installations SET trial_ends_at = now() + interval '30 days'
+     WHERE team_id = $1 AND trial_ends_at IS NULL`,
+    [workspaceId],
+  );
+  accessCache.delete(workspaceId);
+}
+
+const accessCache = new Map<string, { access: boolean; expiresAt: number }>();
+const ACCESS_CACHE_TTL_MS = 30_000;
+
+/** The one gate every handler that can create or change data checks first.
+ *  True if paid and still within the current billing period, still inside
+ *  the 30-day trial, or either row is missing/unset (fail open rather than
+ *  lock someone out on a lookup gap or a pre-trial-column install). A
+ *  'canceling' subscription still counts as access as long as its stored
+ *  current_period_end (or the absence of one) hasn't passed, matching the
+ *  site's "access runs to the end of the paid period" copy. Cached briefly
+ *  since this runs on the hot path of every command, shortcut, view
+ *  submission, and thread reply. */
+export async function hasAccess(workspaceId: string): Promise<boolean> {
+  const cached = accessCache.get(workspaceId);
+  if (cached && cached.expiresAt > Date.now()) return cached.access;
+
+  const [installResult, billingResult] = await Promise.all([
+    pool.query(`SELECT trial_ends_at FROM slack_installations WHERE team_id = $1`, [workspaceId]),
+    pool.query(
+      `SELECT plan, status, current_period_end FROM billing_entitlements WHERE workspace_id = $1`,
+      [workspaceId],
+    ),
+  ]);
+  const install = installResult.rows[0];
+  const billing = billingResult.rows[0];
+
+  const periodStillCurrent =
+    !billing?.current_period_end || new Date(billing.current_period_end).getTime() > Date.now();
+  const paidAndCurrent =
+    billing?.plan === "pro" && (billing.status === "active" || billing.status === "canceling") && periodStillCurrent;
+
+  const stillTrialing =
+    !install || install.trial_ends_at === null || new Date(install.trial_ends_at).getTime() > Date.now();
+
+  const access = paidAndCurrent || stillTrialing;
+  accessCache.set(workspaceId, { access, expiresAt: Date.now() + ACCESS_CACHE_TTL_MS });
+  return access;
+}
+
+/** Consistent copy for every handler that blocks on hasAccess() === false. */
+export function trialEndedMessage(workspaceId: string): string {
+  return (
+    `Your Calledit trial has ended. Subscribe to keep using Calledit for the whole workspace: ` +
+    `https://runciter.app/call?install=${workspaceId}`
+  );
+}
 
 function rowToCall(r: any): Call {
   return {

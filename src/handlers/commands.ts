@@ -2,11 +2,13 @@ import type { App } from "@slack/bolt";
 import {
   cancelCall,
   findCallBySeq,
+  hasAccess,
   listCallsForUser,
   listOpenCallsInChannel,
   listPredictions,
   lockCall,
   recordAuditEvent,
+  trialEndedMessage,
 } from "../db";
 import { buildNewCallModal, buildResolveModal, DEFAULT_PROXY_ROWS } from "../modals";
 import { cancelNoticeBlocks, lockNoticeBlocks, openCallsOverviewBlocks } from "../blocks";
@@ -20,6 +22,20 @@ export function registerCommandHandlers(app: App) {
     const arg = rest.join(" ");
 
     try {
+      // Single choke point for every subcommand, including opening the new
+      // call modal (sub === undefined). Anyone who completed Slack OAuth
+      // used to get unrestricted, permanent access, nothing here or
+      // anywhere else checked billing_entitlements or a trial window at
+      // all.
+      if (!(await hasAccess(command.team_id))) {
+        await client.chat.postEphemeral({
+          channel: command.channel_id,
+          user: command.user_id,
+          text: trialEndedMessage(command.team_id),
+        });
+        return;
+      }
+
       switch (sub) {
         case undefined:
           await client.views.open({

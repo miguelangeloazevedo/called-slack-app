@@ -74,26 +74,37 @@ export async function handlePaddleWebhook(req: IncomingMessage, res: ServerRespo
     return;
   }
 
+  // Paddle subscription objects carry the paid-through date at
+  // current_billing_period.ends_at. Without recording it, hasAccess() (see
+  // db.ts) had no way to know whether a 'canceling' subscription's period
+  // had actually run out yet, only that cancellation had been requested.
+  const currentPeriodEnd: string | null = data.current_billing_period?.ends_at ?? null;
+
   switch (eventType) {
     case "subscription.created":
     case "subscription.activated":
     case "subscription.updated":
       await pool.query(
-        `INSERT INTO billing_entitlements (workspace_id, plan, paddle_subscription_id, status, updated_at)
-         VALUES ($1, 'pro', $2, 'active', now())
+        `INSERT INTO billing_entitlements (workspace_id, plan, paddle_subscription_id, status, current_period_end, updated_at)
+         VALUES ($1, 'pro', $2, 'active', $3, now())
          ON CONFLICT (workspace_id) DO UPDATE
-           SET plan = 'pro', paddle_subscription_id = $2, status = 'active', updated_at = now()`,
-        [slackInstallId, data.id],
+           SET plan = 'pro', paddle_subscription_id = $2, status = 'active',
+               current_period_end = COALESCE($3, billing_entitlements.current_period_end), updated_at = now()`,
+        [slackInstallId, data.id, currentPeriodEnd],
       );
       break;
 
     case "subscription.canceled":
       // Hold access until period end rather than revoking immediately;
       // Paddle sends this the moment cancellation is scheduled, not when
-      // the paid period actually runs out.
+      // the paid period actually runs out. hasAccess() checks
+      // current_period_end directly, so no separate expiry sweep is needed
+      // for this to actually cut off access once the period passes.
       await pool.query(
-        `UPDATE billing_entitlements SET status = 'canceling', updated_at = now() WHERE workspace_id = $1`,
-        [slackInstallId],
+        `UPDATE billing_entitlements
+            SET status = 'canceling', current_period_end = COALESCE($2, current_period_end), updated_at = now()
+          WHERE workspace_id = $1`,
+        [slackInstallId, currentPeriodEnd],
       );
       break;
 

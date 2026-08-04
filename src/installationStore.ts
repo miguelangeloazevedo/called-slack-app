@@ -1,5 +1,6 @@
 import type { Installation, InstallationQuery, InstallationStore } from "@slack/bolt";
 import { pool } from "./pgPool";
+import { startTrial } from "./db";
 
 // Bolt's default installation store keeps everything in memory (or, in some
 // setups, a flat file) -- fine for a single dev box, useless for a real
@@ -15,12 +16,21 @@ export const pgInstallationStore: InstallationStore = {
     if (!teamId) {
       throw new Error("storeInstallation: no team or enterprise id on installation payload");
     }
-    await pool.query(
+    const { rows } = await pool.query(
       `INSERT INTO slack_installations (team_id, installation, updated_at)
        VALUES ($1, $2, now())
-       ON CONFLICT (team_id) DO UPDATE SET installation = EXCLUDED.installation, updated_at = now()`,
+       ON CONFLICT (team_id) DO UPDATE SET installation = EXCLUDED.installation, updated_at = now()
+       RETURNING (xmax = 0) AS inserted`,
       [teamId, installation],
     );
+    // xmax = 0 is Postgres's standard tell for "this row came from the
+    // INSERT branch of the upsert, not the UPDATE branch" — only a
+    // genuinely new install starts a trial clock; a re-auth of an existing
+    // one (e.g. reinstalling to pick up new scopes) must not reset one
+    // that's already running or already used up.
+    if (rows[0]?.inserted) {
+      await startTrial(teamId);
+    }
   },
 
   fetchInstallation: async (query: InstallationQuery<boolean>) => {

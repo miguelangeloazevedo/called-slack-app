@@ -1,11 +1,13 @@
 import type { App } from "@slack/bolt";
 import {
   createCall,
+  hasAccess,
   listAuditEvents,
   listPredictions,
   recordAuditEvent,
   resolveCall,
   setCallThread,
+  trialEndedMessage,
   upsertPrediction,
 } from "../db";
 import { NEW_CALL_CALLBACK_ID, RESOLVE_CALLBACK_ID } from "../modals";
@@ -23,6 +25,19 @@ export function registerViewSubmissionHandlers(app: App) {
     };
     const values = view.state.values;
     const creatorId = body.user.id;
+    const teamId = body.team?.id ?? body.user.team_id ?? "";
+
+    // Checked before the ack() below (not after) specifically so a blocked
+    // submission can still use response_action: "errors" against an input
+    // block, the same inline-error path a blank question uses, rather than
+    // silently ack-ing and posting nothing. This is a second layer behind
+    // the /calledit command's own gate: it also catches a new-call modal
+    // that was opened while access was still valid and submitted after a
+    // trial expired mid-fill.
+    if (teamId && !(await hasAccess(teamId))) {
+      await ack({ response_action: "errors", errors: { question: trialEndedMessage(teamId) } });
+      return;
+    }
 
     const question = values.question?.value?.value?.trim();
     // Criteria is optional now, revealed via the "+ Add acceptance
@@ -69,7 +84,7 @@ export function registerViewSubmissionHandlers(app: App) {
     const closesAt = new Date(`${closesAtDate}T17:00:00Z`);
 
     const call = await createCall({
-      workspaceId: body.team?.id ?? body.user.team_id ?? "",
+      workspaceId: teamId,
       channelId: meta.channelId,
       question: question!,
       criteria: criteria || null,
@@ -106,6 +121,11 @@ export function registerViewSubmissionHandlers(app: App) {
   });
 
   app.view(RESOLVE_CALLBACK_ID, async ({ ack, view, body, client }) => {
+    const resolveTeamId = body.team?.id ?? body.user.team_id ?? "";
+    if (resolveTeamId && !(await hasAccess(resolveTeamId))) {
+      await ack({ response_action: "errors", errors: { result: trialEndedMessage(resolveTeamId) } });
+      return;
+    }
     await ack();
     const meta = JSON.parse(view.private_metadata) as { callId: string };
     const values = view.state.values;

@@ -1,6 +1,6 @@
 import type { App } from "@slack/bolt";
 import { buildNewCallModal, nextProxyRowCount } from "../modals";
-import { getCall, recordAuditEvent } from "../db";
+import { getCall, hasAccess, recordAuditEvent, trialEndedMessage } from "../db";
 
 interface NewCallPrivateMetadata {
   channelId: string;
@@ -50,6 +50,15 @@ export function registerActionHandlers(app: App) {
     if (!callId) return;
     const call = await getCall(callId);
     if (!call) return;
+
+    if (!(await hasAccess(call.workspaceId))) {
+      await client.chat.postEphemeral({
+        channel: call.channelId,
+        user: body.user.id,
+        text: trialEndedMessage(call.workspaceId),
+      });
+      return;
+    }
 
     await client.chat.postEphemeral({
       channel: call.channelId,

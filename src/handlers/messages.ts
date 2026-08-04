@@ -1,5 +1,5 @@
 import type { App } from "@slack/bolt";
-import { getCallByThread, recordAuditEvent, upsertPrediction } from "../db";
+import { getCallByThread, hasAccess, recordAuditEvent, trialEndedMessage, upsertPrediction } from "../db";
 
 // Turns a reply in a call's own thread into that person's prediction. This
 // is what actually closes the loop for channel mode ("anyone in the
@@ -40,6 +40,17 @@ export function registerMessageHandlers(app: App) {
 
     const call = await getCallByThread(message.channel, message.thread_ts);
     if (!call) return;
+
+    // Second layer behind the /calledit command's own gate: a thread reply
+    // is the other real way a prediction gets written, and it never went
+    // through the slash command at all, so it needs its own check rather
+    // than inheriting one from somewhere else.
+    if (!(await hasAccess(call.workspaceId))) {
+      await client.chat
+        .postEphemeral({ channel: message.channel, user: message.user, text: trialEndedMessage(call.workspaceId) })
+        .catch(() => {});
+      return;
+    }
 
     await upsertPrediction(call.id, message.user, message.text.trim());
     await recordAuditEvent(call.id, message.user, "predicted", "via thread reply");
