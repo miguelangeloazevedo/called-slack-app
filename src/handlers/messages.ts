@@ -13,14 +13,19 @@ import { getCallByThread, recordAuditEvent, upsertPrediction } from "../db";
 // manifest.json. Both are additions since the app was first installed, so
 // existing installs need to reauthorize for this to take effect.
 //
-// Deliberate trade-off: any plain reply in an open call's thread, from
-// anyone other than the call's own creator, is treated as a prediction,
-// there's no separate "I'm submitting a call now" confirmation step. That
-// means casual chatter in the thread before it locks ("nice one", "what's
-// the deadline again?") also gets recorded as that person's pick. Keeping
-// this simple was judged worth that risk; a more careful version would
-// need an explicit submission step, which would undercut the free-text,
-// unprescriptive design this modal was built around.
+// Deliberate trade-off: any plain reply in an open call's thread is
+// treated as a prediction, including from the call's own creator, there's
+// no separate "I'm submitting a call now" confirmation step. That means
+// casual chatter in the thread before it locks ("nice one", "what's the
+// deadline again?") also gets recorded as that person's pick. An earlier
+// version specifically excluded the creator to guard against exactly that,
+// which backfired: it also silently blocked the creator from ever using
+// /calledit join on their own call, with no error, just no tick and no
+// recorded prediction. Explicit intent (running /calledit join first) is
+// worth more than that guard was, so it's gone. Keeping this simple was
+// judged worth the stray-chatter risk either way; a more careful version
+// would need an explicit submission step, which would undercut the
+// free-text, unprescriptive design this modal was built around.
 export function registerMessageHandlers(app: App) {
   app.message(async ({ message, client }) => {
     // Only plain, current, threaded replies: skip edits/deletions/joins
@@ -35,10 +40,6 @@ export function registerMessageHandlers(app: App) {
 
     const call = await getCallByThread(message.channel, message.thread_ts);
     if (!call) return;
-
-    // The creator narrating in their own thread ("adding Sam now...")
-    // shouldn't get recorded as the creator's own prediction.
-    if (message.user === call.creatorId) return;
 
     await upsertPrediction(call.id, message.user, message.text.trim());
     await recordAuditEvent(call.id, message.user, "predicted", "via thread reply");

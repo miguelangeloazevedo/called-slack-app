@@ -66,6 +66,58 @@ export function openCallBlocks(call: Call): KnownBlock[] {
   return blocks;
 }
 
+// Everything currently open in one channel, whoever started it, with every
+// person's call so far under each one. This is what /calledit open renders
+// (see handlers/commands.ts); a plain list of questions wasn't enough to
+// answer "what's actually going on right now", this is meant to be read on
+// its own without needing to open each call individually.
+export function openCallsOverviewBlocks(
+  calls: Call[],
+  predictionsByCallId: Map<string, Prediction[]>,
+): KnownBlock[] {
+  const blocks: KnownBlock[] = [
+    {
+      type: "header",
+      text: { type: "plain_text", text: `🔔 ${calls.length} open in this channel` },
+    },
+  ];
+
+  calls.forEach((call, i) => {
+    if (i > 0) blocks.push({ type: "divider" });
+
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: `*#${call.seq}  ${call.question}*` },
+    });
+
+    const meta = [`Closes ${formatDeadline(call.closesAt)}`, `Winnings: ${call.winnings}`];
+    if (call.reviewerId) meta.push(`Reviewer <@${call.reviewerId}>`);
+    blocks.push({
+      type: "context",
+      elements: [{ type: "mrkdwn", text: meta.join("   ·   ") }],
+    });
+
+    const predictions = predictionsByCallId.get(call.id) ?? [];
+    const showValues = call.visibility === "open";
+    const lines = predictions.length
+      ? predictions
+          .map((p) => (showValues ? `• <@${p.userId}> — ${p.value}` : `• <@${p.userId}> — 🔒 sealed`))
+          .join("\n")
+      : "_Nobody's called it yet._";
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: `*Calls so far*\n${lines}` },
+    });
+
+    blocks.push({
+      type: "context",
+      elements: [{ type: "mrkdwn", text: `join with \`/calledit join ${call.seq}\`` }],
+    });
+  });
+
+  return blocks;
+}
+
 export function lockNoticeBlocks(call: Call, predictions: Prediction[]): KnownBlock[] {
   const showValues = call.visibility === "open";
   const lines = predictions

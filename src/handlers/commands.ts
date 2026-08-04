@@ -8,7 +8,8 @@ import {
   recordAuditEvent,
 } from "../db";
 import { buildNewCallModal, buildResolveModal, DEFAULT_PROXY_ROWS } from "../modals";
-import { lockNoticeBlocks } from "../blocks";
+import { lockNoticeBlocks, openCallsOverviewBlocks } from "../blocks";
+import type { Prediction } from "../types";
 
 export function registerCommandHandlers(app: App) {
   app.command("/calledit", async ({ ack, command, client, body }) => {
@@ -52,13 +53,25 @@ export function registerCommandHandlers(app: App) {
 
         case "open": {
           const calls = await listOpenCallsInChannel(command.channel_id);
-          const text = calls.length
-            ? calls.map((c) => `#${c.seq} ${c.question}`).join("\n")
-            : "No calls are open in this channel right now.";
+          if (!calls.length) {
+            await client.chat.postEphemeral({
+              channel: command.channel_id,
+              user: command.user_id,
+              text: "No calls are open in this channel right now.",
+            });
+            return;
+          }
+          // One extra query per call for its predictions; fine at the
+          // handful-of-open-calls-per-channel scale this runs at.
+          const predictionsByCallId = new Map<string, Prediction[]>();
+          for (const call of calls) {
+            predictionsByCallId.set(call.id, await listPredictions(call.id));
+          }
           await client.chat.postEphemeral({
             channel: command.channel_id,
             user: command.user_id,
-            text,
+            text: `${calls.length} call${calls.length === 1 ? "" : "s"} open in this channel`,
+            blocks: openCallsOverviewBlocks(calls, predictionsByCallId),
           });
           return;
         }
