@@ -119,7 +119,11 @@ export function openCallsOverviewBlocks(
 }
 
 export function lockNoticeBlocks(call: Call, predictions: Prediction[]): KnownBlock[] {
-  const showValues = call.visibility === "open";
+  // "open" was always visible. "sealed_until_close" means exactly that:
+  // sealed only until the call closes, this lock notice IS that moment, so
+  // it reveals here too. Only "sealed_until_result" stays hidden past this
+  // point, until settleBlocks reveals it at resolve time.
+  const showValues = call.visibility === "open" || call.visibility === "sealed_until_close";
   const lines = predictions
     .map((p) => (showValues ? `<@${p.userId}>: ${p.value}` : `<@${p.userId}>: hidden`))
     .join("\n");
