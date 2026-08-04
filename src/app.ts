@@ -1,5 +1,4 @@
 import "dotenv/config";
-import express from "express";
 import { App, SocketModeReceiver } from "@slack/bolt";
 import { pgInstallationStore } from "./installationStore";
 import { renderInstallPage } from "./installPage";
@@ -11,15 +10,30 @@ import { registerShortcutHandlers } from "./handlers/shortcuts";
 import { startReminders } from "./reminders";
 
 const scopes = (process.env.SLACK_SCOPES ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+const port = Number(process.env.PORT ?? 3300);
 
 // Socket Mode, matching Ledger and the manifest (socket_mode_enabled: true).
 // An earlier version of this file used a plain ExpressReceiver instead,
 // which meant Calledit had an HTTP server but was never actually connected
 // to Slack over the socket, so commands and interactivity silently never
-// arrived. SocketModeReceiver still runs a small internal Express app for
-// the OAuth install/redirect endpoints (exposed as `receiver.app`, used
-// below for the Paddle webhook route); everything else, commands, actions,
-// view submissions, comes over the WebSocket connection instead of HTTP.
+// arrived.
+//
+// A second, later version of this file assumed SocketModeReceiver exposed
+// an Express app at `receiver.app`, the way ExpressReceiver does, and cast
+// past the type checker to reach it. That was wrong and crashed on boot
+// ("Cannot read properties of undefined (reading 'post')"): checked against
+// the installed @slack/bolt source directly, SocketModeReceiver is not built
+// on Express at all. It runs its own bare `http.createServer` internally,
+// used only for the OAuth install/redirect paths and for whatever routes
+// are passed in via `customRoutes` below, and `this.app` on that class is
+// actually the Bolt `App` instance itself (set later via `.init()`), not an
+// Express app. Extra HTTP routes have to be declared up front as
+// `customRoutes`; their handlers get Node's raw req/res, not Express's.
+//
+// Also worth knowing: `app.start(port)` does NOT forward `port` to
+// SocketModeReceiver, its `start()` takes no arguments and always listens on
+// `installerOptions.port` (default 3000). PORT from .env only takes effect
+// because it's threaded through explicitly below.
 const receiver = new SocketModeReceiver({
   appToken: process.env.SLACK_APP_TOKEN!,
   clientId: process.env.SLACK_CLIENT_ID!,
@@ -28,30 +42,23 @@ const receiver = new SocketModeReceiver({
   scopes,
   installationStore: pgInstallationStore,
   installerOptions: {
+    port,
     // Built explicitly this time, matching the runciter.app/call branding,
     // rather than left on Bolt's plain library default.
     renderHtmlForInstallPath: (installUrl: string) => renderInstallPage(installUrl),
   },
+  // The Paddle webhook needs the exact raw request body for HMAC
+  // verification. handlePaddleWebhook reads it straight off the Node
+  // request stream itself, see paddleWebhook.ts, since there is no
+  // Express (and so no express.raw()) in this receiver.
+  customRoutes: [
+    {
+      path: "/paddle/webhook",
+      method: "POST",
+      handler: handlePaddleWebhook,
+    },
+  ],
 });
-
-// The Paddle webhook needs the raw request body for HMAC verification, so
-// its route is registered directly on the receiver's underlying Express
-// app, with express.raw() scoped to just this path. Bolt's own OAuth
-// routes parse JSON; mixing that with a route that needs the untouched raw
-// bytes is a known footgun if the raw-body middleware isn't applied this
-// narrowly.
-//
-// `receiver.app` genuinely exists at runtime, it's how SocketModeReceiver
-// wires up its own install/oauth_redirect routes, it's just typed private
-// in @slack/bolt's declarations rather than exposed as public API. Cast
-// past the compiler check rather than standing up a second HTTP server on
-// a different port, which would need its own reverse-proxy entry I can't
-// configure from here. Re-check this line if @slack/bolt is ever upgraded.
-(receiver as unknown as { app: express.Express }).app.post(
-  "/paddle/webhook",
-  express.raw({ type: "application/json" }),
-  handlePaddleWebhook,
-);
 
 const app = new App({
   receiver,
@@ -64,8 +71,9 @@ registerViewSubmissionHandlers(app);
 registerShortcutHandlers(app);
 
 (async () => {
-  const port = Number(process.env.PORT ?? 3300);
-  await app.start(port);
+  // Port is already wired in via installerOptions.port above; app.start()
+  // takes no arguments for SocketModeReceiver.
+  await app.start();
   startReminders(app);
   console.log(`⚡️ Calledit is running on port ${port} (OAuth-installable).`);
 })().catch((err) => {

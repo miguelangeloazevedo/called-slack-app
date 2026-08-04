@@ -1,6 +1,20 @@
 import crypto from "crypto";
-import type { Request, Response } from "express";
+import type { IncomingMessage, ServerResponse } from "http";
 import { pool } from "./pgPool";
+
+// Reads the request body as a raw Buffer. Registered as a SocketModeReceiver
+// customRoute (see app.ts), so this gets Node's bare IncomingMessage, not an
+// Express request, there is no express.raw() middleware doing this for us.
+// Reading it raw, rather than parsing JSON straight off the stream, matters
+// because Paddle's signature is computed over the exact undecoded bytes.
+function readRawBody(req: IncomingMessage): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
 
 // Paddle billing webhook. Same reconciliation shape as Ledger: a checkout
 // carries either a verified Slack team id (customData.slackInstallId, set
@@ -30,12 +44,14 @@ export function verifyPaddleSignature(rawBody: Buffer, signatureHeader: string |
   return expectedBuf.length === actualBuf.length && crypto.timingSafeEqual(expectedBuf, actualBuf);
 }
 
-export async function handlePaddleWebhook(req: Request, res: Response) {
-  const signature = req.header("paddle-signature");
-  const rawBody = req.body as Buffer; // mounted with express.raw() in app.ts
+export async function handlePaddleWebhook(req: IncomingMessage, res: ServerResponse) {
+  const rawBody = await readRawBody(req);
+  const signatureHeader = req.headers["paddle-signature"];
+  const signature = Array.isArray(signatureHeader) ? signatureHeader[0] : signatureHeader;
 
   if (!verifyPaddleSignature(rawBody, signature)) {
-    res.status(401).send("invalid signature");
+    res.writeHead(401, { "Content-Type": "text/plain" });
+    res.end("invalid signature");
     return;
   }
 
@@ -52,7 +68,9 @@ export async function handlePaddleWebhook(req: Request, res: Response) {
         `Unverified hint present: ${JSON.stringify(slackWorkspaceHint ?? "none")}. ` +
         `Entitlement NOT applied, needs manual reconciliation.`,
     );
-    res.status(200).send("ok"); // acknowledge receipt either way, Paddle retries on non-2xx
+    // acknowledge receipt either way, Paddle retries on non-2xx
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("ok");
     return;
   }
 
@@ -85,5 +103,6 @@ export async function handlePaddleWebhook(req: Request, res: Response) {
       break;
   }
 
-  res.status(200).send("ok");
+  res.writeHead(200, { "Content-Type": "text/plain" });
+  res.end("ok");
 }
